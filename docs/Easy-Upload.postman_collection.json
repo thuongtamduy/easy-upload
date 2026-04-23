@@ -1,0 +1,205 @@
+{
+  "info": {
+    "name": "Easy Upload",
+    "description": "File storage API — upload, manage, share.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "X-Api-Key", "type": "string" },
+      { "key": "value", "value": "{{api_key}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://example.com" },
+    { "key": "api_key",  "value": "CHANGE_ME_TO_A_RANDOM_SECRET_KEY", "type": "string", "description": "Lấy từ file config.php" },
+    { "key": "id",       "value": "",                   "description": "Public ID của file (lấy từ response Upload hoặc List)" },
+    { "key": "token",    "value": "",                   "description": "Share token (tự động lưu khi gọi Share)" }
+  ],
+  "item": [
+    {
+      "name": "🧹 Maintenance Cron",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/?action=maintenance", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "maintenance" }] }
+      }
+    },
+    {
+      "name": "📊 Stats",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/?action=stats", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "stats" }] }
+      }
+    },
+    {
+      "name": "📋 List",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=list&page=1",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [
+            { "key": "action", "value": "list" },
+            { "key": "page",   "value": "1" },
+            { "key": "q",      "value": "", "disabled": true, "description": "Tìm theo tên file" },
+            { "key": "from",   "value": "2026-01-01", "disabled": true, "description": "YYYY-MM-DD" },
+            { "key": "to",     "value": "2026-12-31", "disabled": true, "description": "YYYY-MM-DD" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "⬆️ Upload",
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "const res = pm.response.json();",
+            "if (res.uploaded?.[0]?.id) pm.collectionVariables.set('id', res.uploaded[0].id);",
+            "pm.test('Upload OK', () => pm.response.to.have.status(201));"
+          ],
+          "type": "text/javascript"
+        }
+      }],
+      "request": {
+        "method": "POST",
+        "body": { "mode": "formdata", "formdata": [{ "key": "files[]", "type": "file", "src": [] }] },
+        "url": { "raw": "{{base_url}}/?action=upload", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "upload" }] }
+      }
+    },
+    {
+      "name": "🗑️ Delete",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=delete&id={{id}}",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [{ "key": "action", "value": "delete" }, { "key": "id", "value": "{{id}}" }]
+        }
+      }
+    },
+    {
+      "name": "🗑️ Bulk Delete",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "ids[]", "value": "{{id}}", "type": "text" },
+            { "key": "ids[]", "value": "",       "type": "text", "description": "Thêm ID thứ 2,3..." }
+          ]
+        },
+        "url": { "raw": "{{base_url}}/?action=bulk_delete", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "bulk_delete" }] }
+      }
+    },
+    {
+      "name": "📥 Đóng gói Zip (Multi-download)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=zip&ids={{id}},id2",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [
+            { "key": "action", "value": "zip" },
+            { "key": "ids", "value": "{{id}},id2" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "🔗 Share (permanent)",
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "const res = pm.response.json();",
+            "if (res.token) pm.collectionVariables.set('token', res.token);",
+            "pm.test('Token created', () => pm.expect(res.token).to.be.a('string'));"
+          ],
+          "type": "text/javascript"
+        }
+      }],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=share&id={{id}}&expires=0",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [
+            { "key": "action",   "value": "share" },
+            { "key": "id",       "value": "{{id}}" },
+            { "key": "expires",  "value": "0",    "description": "0=vĩnh viễn | 3600=1h | 86400=24h" },
+            { "key": "password", "value": "",     "disabled": true, "description": "Tuỳ chọn: mật khẩu bảo vệ" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "📋 Shares (list of file)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=shares&id={{id}}",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [{ "key": "action", "value": "shares" }, { "key": "id", "value": "{{id}}" }]
+        }
+      }
+    },
+    {
+      "name": "🚫 Revoke share",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/?action=revoke&token={{token}}",
+          "host": ["{{base_url}}"],
+          "path": [""],
+          "query": [{ "key": "action", "value": "revoke" }, { "key": "token", "value": "{{token}}" }]
+        }
+      }
+    },
+    {
+      "name": "🌐 CDN — serve file",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/file/{{token}}", "host": ["{{base_url}}"], "path": ["file", "{{token}}"] }
+      }
+    },
+    {
+      "name": "🌐 CDN — resize ?s=300",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/file/{{token}}?s=300",
+          "host": ["{{base_url}}"],
+          "path": ["file", "{{token}}"],
+          "query": [{ "key": "s", "value": "300", "description": "Square crop. Hợp lệ: 100 150 200 300 400 500 600 800 1000 1200" }]
+        }
+      }
+    },
+    {
+      "name": "🌐 CDN — resize ?w=800",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/file/{{token}}?w=800",
+          "host": ["{{base_url}}"],
+          "path": ["file", "{{token}}"],
+          "query": [{ "key": "w", "value": "800", "description": "Width. Hợp lệ: 100 150 200 300 400 500 600 800 1000 1200" }]
+        }
+      }
+    },
+    {
+      "name": "🧹 Clear cache",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/?action=clear_cache", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "clear_cache" }] }
+      }
+    }
+  ]
+}

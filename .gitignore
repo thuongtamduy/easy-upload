@@ -1,0 +1,18 @@
+# App config (chứa API key, không commit)
+config.php
+
+# Upload data & database — không commit lên git
+storage/uploads/
+storage/cache/
+storage/database.db
+storage/database.db-wal
+storage/database.db-shm
+storage/.htaccess
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+error_log
+*.log

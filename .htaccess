@@ -1,0 +1,42 @@
+AddHandler application/x-httpd-alt-php74___lsphp .php
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “alt-php84” package as the default “PHP” programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-alt-php84 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
+# Tắt kiểm tra redirect status của PHP CGI
+<IfModule mod_env.c>
+    SetEnv REDIRECT_STATUS 200
+</IfModule>
+
+# 2. Ghi đè cấu hình PHP (Nếu Hosting cho phép)
+php_value upload_max_filesize 64M
+php_value post_max_size 64M
+php_value memory_limit 256M
+php_value max_execution_time 300
+
+# 3. Routing: Đưa mọi yêu cầu về index.php
+RewriteEngine On
+# Chặn liệt kê thư mục cho toàn bộ website
+Options -Indexes
+RewriteBase /
+
+# /file/{public_id} → truy cập trực tiếp
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^file/([a-zA-Z0-9]+)/?$ index.php?pubid=$1 [QSA,L]
+
+# /share/{token} → share link (password/expiry)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^share/([a-zA-Z0-9]+)/?$ index.php?token=$1 [QSA,L]
+
+# 4. Backward Compatibility V1: Xử lý resize ảnh cũ từ storage/uploads/
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteCond %{QUERY_STRING} (w|h|s)=
+RewriteRule ^storage/uploads/(.*)$ index.php?process_image=$1 [QSA,L]
+
+# Catch-all: mọi request không match ở trên → index.php (trả JSON thay vì LiteSpeed HTML)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]
