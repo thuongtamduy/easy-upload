@@ -1,8 +1,9 @@
 <?php
 /**
- * Easy Upload v2.1
+ * Easy Upload v3.0
  *
  * New features:
+ *   - Auto-Convert to WebP format for optimal bandwidth
  *   - Shareable links with expiry time       → ?action=share
  *   - Password-protected share links         → ?action=share&password=
  *   - /file/{public_id}  → truy cập trực tiếp qua public_id (vĩnh viễn)
@@ -147,22 +148,37 @@ function resize_and_serve(string $filePath, string $mime, string $name, string $
     $s = (int)($_GET['s'] ?? 0);
     $allowed = [100,150,200,300,400,500,600,800,1000,1200];
 
+    // Check if browser supports WebP
+    $acceptWebp = str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'image/webp');
+    $useWebp = $acceptWebp && $mime !== 'image/gif' && $mime !== 'image/webp';
+
     if (($w || $h || $s) && str_starts_with($mime, 'image/') && extension_loaded('imagick')) {
         if (in_array($w, $allowed) || in_array($h, $allowed) || in_array($s, $allowed)) {
-            $cachePath = THUMB_DIR . $cachePrefix . '_w' . $w . '_h' . $h . '_s' . $s;
+            $suffix    = $useWebp ? '.webp' : '';
+            $cachePath = THUMB_DIR . $cachePrefix . '_w' . $w . '_h' . $h . '_s' . $s . $suffix;
+
             if (!file_exists($cachePath)) {
                 try {
                     $img = new Imagick($filePath);
                     if ($s > 0) $img->cropThumbnailImage($s, $s);
                     else $img->thumbnailImage($w, $h, ($w > 0 && $h > 0));
-                    $img->setImageCompressionQuality(85);
+                    
+                    if ($useWebp) {
+                        $img->setImageFormat('webp');
+                        $img->setImageCompressionQuality(80);
+                    } else {
+                        $img->setImageCompressionQuality(85);
+                    }
+                    
                     $img->writeImage($cachePath);
                     chmod($cachePath, 0644);
                     $img->destroy();
                 } catch (Exception $e) {}
             }
             if (file_exists($cachePath)) {
-                serve_file($cachePath, mime_content_type($cachePath), $name);
+                $serveMime = $useWebp ? 'image/webp' : mime_content_type($cachePath);
+                $serveName = $useWebp ? pathinfo($name, PATHINFO_FILENAME) . '.webp' : $name;
+                serve_file($cachePath, $serveMime, $serveName);
             }
         }
     }
@@ -290,9 +306,15 @@ if (isset($_GET['process_image'])) {
     $w = (int)($_GET['w'] ?? 0);
     $h = (int)($_GET['h'] ?? 0);
     $s = (int)($_GET['s'] ?? 0);
-    $cacheName = 'cache_w'.$w.'_h'.$h.'_s'.$s.'_' . str_replace('/', '_', $_GET['process_image']);
-    $cachePath = THUMB_DIR . $cacheName;
     $allowed   = [100,150,200,300,400,500,600,800,1000,1200];
+
+    $mime = mime_content_type($source) ?: 'application/octet-stream';
+    $acceptWebp = str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'image/webp');
+    $useWebp = $acceptWebp && $mime !== 'image/gif' && $mime !== 'image/webp' && str_starts_with($mime, 'image/');
+
+    $suffix = $useWebp ? '.webp' : '';
+    $cacheName = 'cache_w'.$w.'_h'.$h.'_s'.$s.'_' . str_replace('/', '_', $_GET['process_image']) . $suffix;
+    $cachePath = THUMB_DIR . $cacheName;
 
     if (!file_exists($cachePath) && extension_loaded('imagick')) {
         try {
@@ -300,7 +322,14 @@ if (isset($_GET['process_image'])) {
                 $img = new Imagick($source);
                 if ($s > 0) $img->cropThumbnailImage($s, $s);
                 else $img->thumbnailImage($w, $h, ($w > 0 && $h > 0));
-                $img->setImageCompressionQuality(85);
+                
+                if ($useWebp) {
+                    $img->setImageFormat('webp');
+                    $img->setImageCompressionQuality(80);
+                } else {
+                    $img->setImageCompressionQuality(85);
+                }
+                
                 $img->writeImage($cachePath);
                 chmod($cachePath, 0644);
                 $img->destroy();
@@ -309,7 +338,9 @@ if (isset($_GET['process_image'])) {
     }
 
     $serve = file_exists($cachePath) ? $cachePath : $source;
-    serve_file($serve, mime_content_type($serve), basename($serve));
+    $serveMime = ($serve === $cachePath && $useWebp) ? 'image/webp' : mime_content_type($serve);
+    $serveName = ($serve === $cachePath && $useWebp) ? pathinfo(basename($serve), PATHINFO_FILENAME) . '.webp' : basename($serve);
+    serve_file($serve, $serveMime, $serveName);
 }
 
 // ============================================================
