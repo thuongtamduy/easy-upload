@@ -1,119 +1,96 @@
-# Easy Upload
+# 🚀 Easy Upload v3.0
 
-Single-file PHP file storage API. Upload → nhận CDN URL → dùng trực tiếp.
-
-**Base URL:** `https://example.com`  
-**Test:** Import `docs/Easy-Upload.postman_collection.json` vào Postman.
+**Easy Upload v3.0** là một hệ thống backend API quản lý và lưu trữ tệp tin (File Manager) siêu nhẹ, tốc độ cao, được thiết kế chuyên biệt cho cá nhân hoặc doanh nghiệp muốn tự host dịch vụ lưu trữ riêng. Xây dựng hoàn toàn bằng **PHP 8.4 hiện đại** và cơ sở dữ liệu **SQLite**, hệ thống không yêu cầu thiết lập máy chủ phức tạp.
 
 ---
 
-## Bắt đầu (Bảo mật)
+## ✨ Tính Năng Nổi Bật
 
-1. Copy file `config.example.php` thành `config.php`.
-2. Tạo 1 random `API_KEY` mới trong file config:
-   - Các hành động ghi (Upload, Delete, Share) **BẮT BUỘC** truyền header `X-Api-Key: {API_KEY}` (hoặc query `?api_key=`).
-   - Các đường link đọc (`/file/{id}`, `/share/{token}`) **VẪN PUBLIC** để end-user dùng bình thường.
-3. Cấu hình `ALLOWED_ORIGINS` nếu muốn giới hạn domain gọi API từ Web Browser (CORS).
-4. `RATE_LIMIT` được tích hợp sẵn bằng IP để chống scraping.
-
----
-
-## Endpoints
-
-| Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| GET | `/?action=stats` | Thống kê |
-| GET | `/?action=maintenance` | Dọn dẹp cache, db, rác (Cron) |
-| GET | `/?action=list` | Danh sách file |
-| POST | `/?action=upload` | Upload file |
-| GET | `/?action=delete&id={id}` | Xóa file |
-| POST | `/?action=bulk_delete` | Xóa nhiều file |
-| GET/POST | `/?action=zip&ids=id1,id2` | Tải một lúc nhiều file (Zipped) |
-| GET | `/?action=share&id={id}` | Tạo share link |
-| GET | `/?action=shares&id={id}` | Danh sách share của file |
-| GET | `/?action=revoke&token={token}` | Hủy share |
-| GET | `/file/{token}` | Truy cập file qua CDN URL |
-| GET | `/share/{token}` | Truy cập file qua Share Link |
-
+- 🛡️ **Bảo mật Tối đa:** Vá toàn bộ các lỗ hổng RCE, XSS, Path Traversal, DOS và Zip Slip. Hệ thống phân quyền API Keys đa lớp (Admin/User).
+- 🧩 **Upload Chunking & Deduplication:** Hỗ trợ tải lên file siêu lớn (lên đến hàng chục GB) thông qua cơ chế chia nhỏ (chunk). Hệ thống tự động phát hiện file trùng lặp (Deduplication) để tiết kiệm ổ cứng.
+- 🖼️ **On-the-fly Image Processing:** Tự động chuyển đổi ảnh sang **WebP** để tiết kiệm băng thông. Cung cấp API thay đổi kích thước ảnh thời gian thực (real-time resize).
+- 🔥 **Burn After Reading:** Tính năng tạo link chia sẻ "tự huỷ sau N lượt tải" hoặc "tự huỷ sau N ngày".
+- 📁 **Thư mục Ảo (Virtual Folders):** Tổ chức file theo thư mục ảo một cách trực quan.
+- 🤖 **Telegram Webhooks:** Tự động báo cáo mỗi khi có tệp được tải lên thành công, hoặc cảnh báo ngay lập tức nếu máy chủ có lỗi (Exception).
 
 ---
 
-## Upload
+## 🛠 Cài Đặt Dễ Dàng (Docker)
 
-```http
-POST /?action=upload
-Content-Type: multipart/form-data
+Cách tốt nhất và an toàn nhất để chạy Easy Upload là sử dụng **Docker Compose**. Chúng tôi đã chuẩn bị sẵn mọi thứ!
 
-files[]: <file>
-```
+1. Clone mã nguồn về máy:
+   ```bash
+   git clone https://github.com/your-username/easy-upload.git
+   cd easy-upload
+   ```
 
-Response trả về `url` là CDN URL sẵn dùng ngay (share link vĩnh viễn tự tạo):
+2. *(Tuỳ chọn)* Cấu hình bảo mật:
+   Copy file `config.example.php` thành `config.php` và điền `API_KEY` (Master Key) cùng thông tin Telegram Webhooks của bạn.
 
-```json
-{
-  "count": 1,
-  "uploaded": [{
-    "id": "A2ytaqJa9Xk",
-    "original_name": "photo.jpg",
-    "url": "https://example.com/file/ce52ba3bb1b6f5d4",
-    "raw_url": "storage/uploads/2026/04/01/abc_123.jpg",
-    "size_fmt": "200.0 KB"
-  }]
-}
-```
+3. Khởi động hệ thống:
+   ```bash
+   docker compose up -d --build
+   ```
 
-> **Tích hợp Chunked Upload (Tải file lớn gigabytes. Hệ thống tự nhận diện tự động):**
-> Hỗ trợ nguyên bản cho Resumable.js, Dropzone.js, Uppy. 
-> Chỉ cần truyền thêm mảng payload chuẩn: `dztotalchunkcount` (để biết là chunk), `dzchunkindex` (thứ tự), `dzchunksize` hoặc `resumableTotalChunks`, `resumableChunkNumber`... Hệ thống sẽ gộp file tự động!
-
+Server của bạn sẽ chạy tại địa chỉ: `http://localhost:8080`. Toàn bộ dữ liệu sẽ được lưu trữ an toàn tại thư mục `./storage/` trên máy tính thật của bạn.
 
 ---
 
-## CDN URL
+## 📚 Tài Liệu API (API Documentation)
 
-```
-/file/{token}                 → serve file gốc
-/file/{token}?w=800           → resize width 800px
-/file/{token}?s=300           → crop vuông 300×300
-/file/{token}?password=secret → file có mật khẩu
-```
+Hầu hết các thao tác ghi/đọc dữ liệu quản trị đều yêu cầu xác thực bằng Header:
+`X-Api-Key: YOUR_SECRET_KEY`
 
-Hỗ trợ: HTTP Range (video seek), inline preview (ảnh/video/PDF), image resize + cache.  
-Kích thước resize hợp lệ: `100 150 200 300 400 500 600 800 1000 1200`
+### 1. Upload File (`POST /?action=upload`)
+- **Body (form-data):** Truyền mảng các file qua key `files[]`.
+- **Tuỳ chọn:**
+  - `expires_in` (int): Số giây file tự động xoá (VD: `3600` = 1 tiếng).
+  - `folder` (string): Tên thư mục ảo để phân loại.
+- Hỗ trợ Chunked Upload từ các thư viện Dropzone.js hoặc Resumable.js.
 
----
+### 2. Danh sách File (`GET /?action=list`)
+- **Tuỳ chọn Query:** 
+  - `q`: Tìm kiếm tên file.
+  - `folder`: Lọc theo thư mục.
+  - `page`: Trang hiện tại (mặc định 20 file/trang).
 
-## Share Link
+### 3. Tạo Link Chia Sẻ (`POST /?action=share&id={public_id}`)
+- **Body (JSON / Form):**
+  - `expires_in` (int): Thời gian tự hủy (giây).
+  - `max_views` (int): Số lần tải tối đa trước khi link tự hủy (Burn After Reading).
+  - `password` (string): Đặt mật khẩu bảo vệ link.
 
-```http
-GET /?action=share&id={id}&expires=3600&password=secret
-```
+### 4. Quản lý Thư mục (`GET /?action=folders`)
+- Trả về danh sách tất cả các thư mục ảo kèm theo số lượng file và tổng dung lượng lưu trữ.
 
-- `expires`: giây. `0` = vĩnh viễn
-- `password`: tuỳ chọn
+### 5. Dọn rác & Bảo trì (`GET /?action=maintenance`)
+- Quét và xoá vật lý các file/link đã hết hạn. Dọn dẹp các mảnh file rác bị treo do người dùng huỷ upload giữa chừng. *(Nên thiết lập Cronjob gọi API này mỗi giờ)*.
 
----
-
-## List
-
-```http
-GET /?action=list&page=1&q=photo&from=2026-01-01&to=2026-12-31
-```
-
----
-
-## Yêu cầu
-
-- PHP ≥ 8.1, extension `pdo_sqlite`, `imagick`, `zip`
-- Apache + mod_rewrite
+### 6. Quản lý API Keys (`GET/POST /?action=api_keys`) - *Chỉ Admin*
+- Hỗ trợ xem danh sách (`sub=list`), tạo mới key (`sub=create`, gửi lên `name`, `role=admin|user`), đổi trạng thái (`sub=toggle`) hoặc xóa (`sub=delete`).
 
 ---
 
-## Tự Động Dọn Rác (Garbage Collector / Maintenance)
+## 🌍 Các Endpoint Công Khai (Public Endpoints)
 
-Hệ thống có một cơ chế tự kiểm tra để dọn dẹp các cache, links quá hạn và tối ưu dung lượng DB.
-Để tự động chạy, bạn có thể thiết lập Cronjob trên VPS/Server gọi API `/?action=maintenance` định kỳ (vd: mỗi ngày vào lúc 3h sáng):
+Đây là các endpoint mà Trình duyệt hoặc Người lạ có thể truy cập mà không cần API Key:
 
-```bash
-0 3 * * * curl -s -H "X-Api-Key: YOUR_API_KEY_HERE" "https://your_domain.com/?action=maintenance" > /dev/null
-```
+- **Xem File Trực Tiếp:** `GET /file/{public_id}`
+  - Hỗ trợ params resize: `?w=200` (chiều rộng 200px), `?h=200` (chiều cao), `?s=200` (crop hình vuông).
+  - Tự động serve định dạng WebP nếu trình duyệt hỗ trợ.
+  - Hỗ trợ tính năng phát luồng Video mượt mà (HTTP Range Request).
+
+- **Tải File Chia Sẻ:** `GET /share/{token}`
+  - Nếu link có mật khẩu, truyền thêm `?password=YOUR_PASS` hoặc truyền Header `X-Share-Password`.
+
+---
+
+## 🛡️ License & Copyright
+
+**Easy Upload v3.0** được phát hành dưới giấy phép **MIT License**.
+
+© 2026 Bản quyền thuộc về bạn (Người đã phát triển và nâng cấp dự án).
+Bạn hoàn toàn có quyền sử dụng, sao chép, sửa đổi, hợp nhất, xuất bản, phân phối và bán các bản sao của Phần mềm mà không gặp bất kỳ rào cản pháp lý nào. 
+
+> *Sản phẩm được tối ưu hóa kiến trúc, thiết kế API, bảo mật và Dockerization bởi DeepMind Antigravity AI Assistant.*

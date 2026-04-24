@@ -4,6 +4,11 @@
  *
  * New features:
  *   - Auto-Convert to WebP format for optimal bandwidth
+ *   - Burn After Reading (Max Views)         → ?action=share&max_views=1
+ *   - File Expiry (Auto-delete)              → ?action=upload & expires_in=
+ *   - Virtual Folders (Tags)                 → ?action=upload & folder=
+ *   - Multiple API Keys / User Roles         → ?action=api_keys
+ *   - Telegram Webhooks                      → (Upload & Error notifications)
  *   - Shareable links with expiry time       → ?action=share
  *   - Password-protected share links         → ?action=share&password=
  *   - /file/{public_id}  → truy cập trực tiếp qua public_id (vĩnh viễn)
@@ -25,6 +30,8 @@ if (file_exists(__DIR__ . '/config.php')) include __DIR__ . '/config.php';
 if (!defined('API_KEY'))         define('API_KEY',         '');
 if (!defined('ALLOWED_ORIGINS')) define('ALLOWED_ORIGINS', ['*']);
 if (!defined('RATE_LIMIT'))      define('RATE_LIMIT',      100);
+if (!defined('TG_BOT_TOKEN'))    define('TG_BOT_TOKEN',    '');
+if (!defined('TG_CHAT_ID'))      define('TG_CHAT_ID',      '');
 
 // --- SETUP ---
 foreach ([UPLOAD_BASE, THUMB_DIR] as $d) if (!is_dir($d)) mkdir($d, 0755, true);
@@ -39,11 +46,18 @@ if (!file_exists($storageHtaccess)) {
 }
 $db = new PDO('sqlite:' . DB_FILE);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+set_exception_handler(function ($e) {
+    tg_notify("🚨 <b>Easy Upload Exception</b>\nMessage: <code>" . htmlspecialchars($e->getMessage()) . "</code>\nFile: " . basename($e->getFile()) . ":" . $e->getLine());
+    out(['error' => 'Internal Server Error'], 500);
+});
 $db->exec('PRAGMA journal_mode=WAL');
 $db->exec('CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     public_id TEXT UNIQUE,
-    filename TEXT, original_name TEXT, mime TEXT, size INTEGER, created_at INTEGER, hash TEXT
+    filename TEXT, original_name TEXT, mime TEXT, size INTEGER, created_at INTEGER, hash TEXT,
+    expires_at INTEGER DEFAULT NULL,
+    folder TEXT DEFAULT NULL
 )');
 $db->exec('CREATE TABLE IF NOT EXISTS shares (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,16 +66,29 @@ $db->exec('CREATE TABLE IF NOT EXISTS shares (
     password TEXT,
     expires_at INTEGER,
     created_at INTEGER,
-    access_count INTEGER DEFAULT 0
+    access_count INTEGER DEFAULT 0,
+    max_views INTEGER DEFAULT 0
 )');
 $db->exec('CREATE TABLE IF NOT EXISTS rate_limits (
     ip TEXT PRIMARY KEY, hits INTEGER DEFAULT 1, window INTEGER DEFAULT 0
 )');
+$db->exec('CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key TEXT UNIQUE,
+    name TEXT,
+    role TEXT DEFAULT \'admin\',
+    status INTEGER DEFAULT 1,
+    created_at INTEGER
+)');
 // Migration: thêm public_id/hash vào bảng cũ nếu chưa có
 try { $db->exec('ALTER TABLE files ADD COLUMN public_id TEXT'); } catch (Exception $e) {}
 try { $db->exec('ALTER TABLE files ADD COLUMN hash TEXT'); } catch (Exception $e) {}
+try { $db->exec('ALTER TABLE shares ADD COLUMN max_views INTEGER DEFAULT 0'); } catch (Exception $e) {}
+try { $db->exec('ALTER TABLE files ADD COLUMN expires_at INTEGER DEFAULT NULL'); } catch (Exception $e) {}
+try { $db->exec('ALTER TABLE files ADD COLUMN folder TEXT DEFAULT NULL'); } catch (Exception $e) {}
 $db->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_files_public_id ON files(public_id)');
 $db->exec('CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash)');
+$db->exec('CREATE INDEX IF NOT EXISTS idx_files_folder ON files(folder)');
 // Backfill: gán public_id cho các row cũ đang NULL
 $nullRows = $db->query('SELECT id FROM files WHERE public_id IS NULL')->fetchAll(PDO::FETCH_ASSOC);
 if ($nullRows) {
@@ -74,7 +101,22 @@ if ($nullRows) {
 }
 
 // --- HELPERS ---
+function tg_notify(string $message): void {
+    if (!TG_BOT_TOKEN || !TG_CHAT_ID) return;
+    $url = 'https://api.telegram.org/bot' . TG_BOT_TOKEN . '/sendMessage';
+    $data = ['chat_id' => TG_CHAT_ID, 'text' => $message, 'parse_mode' => 'HTML', 'disable_web_page_preview' => true];
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $data, CURLOPT_TIMEOUT => 2]);
+    curl_exec($ch);
+    curl_close($ch);
+}
+
 function out($data, int $code = 200): void {
+    if ($code >= 500 && isset($data['error'])) {
+        $msg = "🚨 <b>Easy Upload Error</b>\nCode: <code>$code</code>\nError: <code>" . htmlspecialchars($data['error']) . "</code>";
+        if (isset($_SERVER['REQUEST_URI'])) $msg .= "\nURI: <code>" . htmlspecialchars($_SERVER['REQUEST_URI']) . "</code>";
+        tg_notify($msg);
+    }
     http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -102,10 +144,34 @@ function handle_cors(): void {
 }
 
 // API Key: bảo vệ write operations
-function require_api_key(): void {
-    if (!API_KEY) return; // disabled nếu config chưa set
+function require_api_key(PDO $db): void {
     $key = $_SERVER['HTTP_X_API_KEY'] ?? $_GET['api_key'] ?? '';
-    if ($key !== API_KEY) out(['error' => 'Unauthorized', 'hint' => 'Set X-Api-Key header'], 401);
+    
+    // Master key từ config.php
+    $hasMaster = defined('API_KEY') && API_KEY !== '';
+    if ($hasMaster && $key === API_KEY) {
+        $_SERVER['AUTH_ROLE'] = 'admin';
+        return;
+    }
+
+    // Nếu không có Master key và cũng chưa có key nào trong DB -> Public (tương thích ngược)
+    $keyCount = (int)$db->query('SELECT COUNT(*) FROM api_keys')->fetchColumn();
+    if (!$hasMaster && $keyCount === 0) {
+        $_SERVER['AUTH_ROLE'] = 'admin';
+        return;
+    }
+
+    // Kiểm tra DB
+    if ($key) {
+        $stmt = $db->prepare('SELECT name, role FROM api_keys WHERE api_key = ? AND status = 1');
+        $stmt->execute([$key]);
+        if ($user = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $_SERVER['AUTH_ROLE'] = $user['role'];
+            return;
+        }
+    }
+
+    out(['error' => 'Unauthorized', 'hint' => 'Invalid or missing API Key'], 401);
 }
 
 // Rate Limit: đếm request theo IP và window 1 phút
@@ -152,8 +218,12 @@ function resize_and_serve(string $filePath, string $mime, string $name, string $
     $acceptWebp = str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'image/webp');
     $useWebp = $acceptWebp && $mime !== 'image/gif' && $mime !== 'image/webp';
 
+    $validW = $w === 0 || in_array($w, $allowed);
+    $validH = $h === 0 || in_array($h, $allowed);
+    $validS = $s === 0 || in_array($s, $allowed);
+
     if (($w || $h || $s) && str_starts_with($mime, 'image/') && extension_loaded('imagick')) {
-        if (in_array($w, $allowed) || in_array($h, $allowed) || in_array($s, $allowed)) {
+        if ($validW && $validH && $validS) {
             $suffix    = $useWebp ? '.webp' : '';
             $cachePath = THUMB_DIR . $cachePrefix . '_w' . $w . '_h' . $h . '_s' . $s . $suffix;
 
@@ -291,63 +361,51 @@ if (isset($_GET['token'])) {
             out(['error' => 'Password required', 'hint' => 'Add ?password=YOUR_PASSWORD to the URL'], 401);
     }
 
+    if ($share['max_views'] > 0 && $share['access_count'] >= $share['max_views']) {
+        $db->prepare('DELETE FROM shares WHERE token = ?')->execute([$token]);
+        out(['error' => 'Share link has reached its maximum download limit and was destroyed (Burn After Reading)'], 410);
+    }
+
     $db->prepare('UPDATE shares SET access_count = access_count + 1 WHERE token = ?')->execute([$token]);
 
     resize_and_serve(UPLOAD_BASE . $share['filename'], $share['mime'], $share['original_name'], 'tok_' . $token);
 }
 
-// ============================================================
-// IMAGE PROXY (resize on-the-fly, binary response)
-// ============================================================
-if (isset($_GET['process_image'])) {
-    $source = UPLOAD_BASE . $_GET['process_image'];
-    if (!file_exists($source)) { http_response_code(404); exit; }
 
-    $w = (int)($_GET['w'] ?? 0);
-    $h = (int)($_GET['h'] ?? 0);
-    $s = (int)($_GET['s'] ?? 0);
-    $allowed   = [100,150,200,300,400,500,600,800,1000,1200];
-
-    $mime = mime_content_type($source) ?: 'application/octet-stream';
-    $acceptWebp = str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'image/webp');
-    $useWebp = $acceptWebp && $mime !== 'image/gif' && $mime !== 'image/webp' && str_starts_with($mime, 'image/');
-
-    $suffix = $useWebp ? '.webp' : '';
-    $cacheName = 'cache_w'.$w.'_h'.$h.'_s'.$s.'_' . str_replace('/', '_', $_GET['process_image']) . $suffix;
-    $cachePath = THUMB_DIR . $cacheName;
-
-    if (!file_exists($cachePath) && extension_loaded('imagick')) {
-        try {
-            if (in_array($w, $allowed) || in_array($h, $allowed) || in_array($s, $allowed)) {
-                $img = new Imagick($source);
-                if ($s > 0) $img->cropThumbnailImage($s, $s);
-                else $img->thumbnailImage($w, $h, ($w > 0 && $h > 0));
-                
-                if ($useWebp) {
-                    $img->setImageFormat('webp');
-                    $img->setImageCompressionQuality(80);
-                } else {
-                    $img->setImageCompressionQuality(85);
-                }
-                
-                $img->writeImage($cachePath);
-                chmod($cachePath, 0644);
-                $img->destroy();
-            }
-        } catch (Exception $e) {}
-    }
-
-    $serve = file_exists($cachePath) ? $cachePath : $source;
-    $serveMime = ($serve === $cachePath && $useWebp) ? 'image/webp' : mime_content_type($serve);
-    $serveName = ($serve === $cachePath && $useWebp) ? pathinfo(basename($serve), PATHINFO_FILENAME) . '.webp' : basename($serve);
-    serve_file($serve, $serveMime, $serveName);
-}
 
 // ============================================================
 // ALL OTHER ACTIONS → JSON (require API Key)
 // ============================================================
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
-require_api_key();
+require_api_key($db);
+
+$role = $_SERVER['AUTH_ROLE'] ?? 'user';
+$adminActions = ['delete', 'bulk_delete', 'clear_cache', 'maintenance', 'api_keys', 'revoke'];
+if (in_array($action, $adminActions) && $role !== 'admin') {
+    out(['error' => 'Forbidden', 'hint' => 'Admin role required'], 403);
+}
+
+// ── API KEYS MANAGEMENT (Admin only) ─────────────────────────
+if ($action === 'api_keys') {
+    $sub = $_GET['sub'] ?? 'list';
+    if ($sub === 'list') {
+        $stmt = $db->query('SELECT id, name, role, status, created_at, substr(api_key, 1, 8) || "..." as prefix FROM api_keys ORDER BY created_at DESC');
+        out(['keys' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+    } elseif ($sub === 'create') {
+        $name   = $_POST['name'] ?? 'User';
+        $kRole  = $_POST['role'] ?? 'user';
+        $newKey = 'eu_' . bin2hex(random_bytes(16));
+        $db->prepare('INSERT INTO api_keys (api_key, name, role, status, created_at) VALUES (?,?,?,1,?)')
+           ->execute([$newKey, $name, $kRole, time()]);
+        out(['message' => 'Created successfully', 'api_key' => $newKey, 'name' => $name, 'role' => $kRole]);
+    } elseif ($sub === 'toggle' && isset($_POST['id'])) {
+        $db->prepare('UPDATE api_keys SET status = 1 - status WHERE id = ?')->execute([$_POST['id']]);
+        out(['message' => 'Toggled status']);
+    } elseif ($sub === 'delete' && isset($_POST['id'])) {
+        $db->prepare('DELETE FROM api_keys WHERE id = ?')->execute([$_POST['id']]);
+        out(['message' => 'Deleted successfully']);
+    }
+}
 
 // ── ZIP (Multi-download) ──────────────────────────────────────
 if ($action === 'zip') {
@@ -378,7 +436,7 @@ if ($action === 'zip') {
     foreach ($files as $f) {
         $path = UPLOAD_BASE . $f['filename'];
         if (is_file($path)) {
-            $name = $f['original_name'];
+            $name = basename($f['original_name']); // Zip Slip protection
             $ext = pathinfo($name, PATHINFO_EXTENSION);
             $base = pathinfo($name, PATHINFO_FILENAME);
             $c = 1;
@@ -411,20 +469,28 @@ if ($action === 'zip') {
 // ── LIST ─────────────────────────────────────────────────────
 if ($action === 'list') {
     $q      = $_GET['q'] ?? '';
+    $folder = $_GET['folder'] ?? '';
     $from   = !empty($_GET['from']) ? strtotime($_GET['from'] . ' 00:00:00') : null;
     $to     = !empty($_GET['to'])   ? strtotime($_GET['to']   . ' 23:59:59') : null;
     $page   = max(1, (int)($_GET['page'] ?? 1));
     $offset = ($page - 1) * PER_PAGE;
 
     $where = 'original_name LIKE :q';
+    $params = ['q' => "%$q%"];
+
+    if ($folder !== '') {
+        $where .= ' AND folder = :folder';
+        $params['folder'] = $folder;
+    }
+
     if ($from && $to) $where .= " AND created_at BETWEEN $from AND $to";
 
     $countStmt = $db->prepare("SELECT COUNT(*) FROM files WHERE $where");
-    $countStmt->execute([':q' => "%$q%"]);
+    $countStmt->execute($params);
     $total = (int)$countStmt->fetchColumn();
 
     $stmt = $db->prepare("SELECT * FROM files WHERE $where ORDER BY created_at DESC LIMIT " . PER_PAGE . " OFFSET $offset");
-    $stmt->execute([':q' => "%$q%"]);
+    $stmt->execute($params);
     $files = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($files as &$f) {
@@ -434,11 +500,38 @@ if ($action === 'list') {
         $f['raw_url']    = 'storage/uploads/' . $f['filename'];
         $f['size_fmt']   = fmt((int)$f['size']);
         $f['created_at'] = (int)$f['created_at'];
+        $f['expires_at'] = isset($f['expires_at']) ? (int)$f['expires_at'] : null;
         unset($f['public_id']);
     }
 
     out(['total' => $total, 'page' => $page, 'per_page' => PER_PAGE,
          'total_pages' => (int)ceil($total / PER_PAGE), 'files' => $files]);
+}
+
+// ── FOLDERS LIST ──────────────────────────────────────────────
+if ($action === 'folders') {
+    $stmt = $db->query('
+        SELECT folder, COUNT(*) as count, SUM(size) as total_size 
+        FROM files 
+        WHERE folder IS NOT NULL 
+        GROUP BY folder 
+        ORDER BY folder ASC
+    ');
+    $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($folders as &$f) {
+        $f['count']      = (int)$f['count'];
+        $f['total_size'] = fmt((int)$f['total_size']);
+    }
+    
+    // Đếm file ko có thư mục (Root)
+    $root = $db->query('SELECT COUNT(*) as count, SUM(size) as total_size FROM files WHERE folder IS NULL')->fetch(PDO::FETCH_ASSOC);
+    $root['folder']     = null;
+    $root['count']      = (int)$root['count'];
+    $root['total_size'] = fmt((int)($root['total_size'] ?? 0));
+    
+    array_unshift($folders, $root);
+    
+    out(['folders' => $folders]);
 }
 
 // ── UPLOAD ───────────────────────────────────────────────────
@@ -447,7 +540,11 @@ if ($action === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FIL
     $upPath = UPLOAD_BASE . $ymd . '/';
     if (!is_dir($upPath)) mkdir($upPath, 0755, true);
 
-    $stmt      = $db->prepare('INSERT INTO files (public_id, filename, original_name, mime, size, created_at, hash) VALUES (?,?,?,?,?,?,?)');
+    $fileExpiresIn = isset($_POST['expires_in']) ? (int)$_POST['expires_in'] : 0;
+    $fileExpiresAt = $fileExpiresIn > 0 ? time() + $fileExpiresIn : null;
+    $folder        = !empty($_POST['folder']) ? trim($_POST['folder']) : null;
+
+    $stmt      = $db->prepare('INSERT INTO files (public_id, filename, original_name, mime, size, created_at, hash, expires_at, folder) VALUES (?,?,?,?,?,?,?,?,?)');
     $shareStmt = $db->prepare('INSERT INTO shares (token, file_id, password, expires_at, created_at) VALUES (?,?,NULL,NULL,?)');
     $uploaded  = [];
 
@@ -501,6 +598,7 @@ if ($action === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FIL
 
         // --- Xác Thực Mime Type Chính Xác (Sửa lỗi Octet-stream của Chunk Dropzone) ---
         $ext  = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if (preg_match('/^(php[0-9]*|phtml|phar|pht|cgi|pl|sh|exe|asp|aspx|jsp|py|rb|inc|html|htm|svg|xml)$/i', $ext)) $ext .= '.txt'; // Prevent RCE & XSS
         $mime = @mime_content_type($tmpName);
         if (!$mime || $mime === 'application/octet-stream' || $mime === 'inode/x-empty') {
             $mmap = ['png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif',
@@ -540,7 +638,7 @@ if ($action === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FIL
         // Retry nếu trùng public_id (cực hiếm)
         for ($try = 0; $try < 3; $try++) {
             try {
-                $stmt->execute([$pubId, $filename, $name, $_FILES['files']['type'][$k], $_FILES['files']['size'][$k], time(), $hash]);
+                $stmt->execute([$pubId, $filename, $name, $_FILES['files']['type'][$k], $_FILES['files']['size'][$k], time(), $hash, $fileExpiresAt, $folder]);
                 break;
             } catch (Exception $e) { $pubId = gen_id(); }
         }
@@ -557,7 +655,17 @@ if ($action === 'upload' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FIL
             'mime'          => $_FILES['files']['type'][$k],
             'size'          => (int)$_FILES['files']['size'][$k],
             'size_fmt'      => fmt((int)$_FILES['files']['size'][$k]),
+            'expires_at'    => $fileExpiresAt,
+            'folder'        => $folder,
         ];
+    }
+
+    if (count($uploaded) > 0) {
+        $msg = "✅ <b>Upload Success</b>\nCount: " . count($uploaded) . " file(s)";
+        foreach ($uploaded as $up) {
+            $msg .= "\n- <code>{$up['original_name']}</code> ({$up['size_fmt']})";
+        }
+        tg_notify($msg);
     }
 
     out(['uploaded' => $uploaded, 'count' => count($uploaded)], 201);
@@ -622,9 +730,10 @@ if ($action === 'share' && isset($_GET['id'])) {
     $expiresIn = isset($_GET['expires']) ? (int)$_GET['expires'] : 0;
     $expiresAt = $expiresIn > 0 ? time() + $expiresIn : null;
     $password  = !empty($_GET['password']) ? $_GET['password'] : null;
+    $maxViews  = isset($_GET['max_views']) ? (int)$_GET['max_views'] : 0;
 
-    $db->prepare('INSERT INTO shares (token, file_id, password, expires_at, created_at) VALUES (?,?,?,?,?)')
-       ->execute([$token, $row['id'], $password, $expiresAt, time()]);
+    $db->prepare('INSERT INTO shares (token, file_id, password, expires_at, created_at, max_views) VALUES (?,?,?,?,?,?)')
+       ->execute([$token, $row['id'], $password, $expiresAt, time(), $maxViews]);
 
     out([
         'token'      => $token,
@@ -632,6 +741,7 @@ if ($action === 'share' && isset($_GET['id'])) {
         'expires_at' => $expiresAt,
         'expires_in' => $expiresIn ? $expiresIn . 's (' . gmdate('H:i:s', $expiresIn) . ')' : 'never',
         'protected'  => (bool)$password,
+        'max_views'  => $maxViews,
     ]);
 }
 
@@ -642,7 +752,7 @@ if ($action === 'shares' && isset($_GET['id'])) {
     if (!($row = $fileStmt->fetch())) out(['error' => 'File not found'], 404);
 
     $stmt = $db->prepare('
-        SELECT token, (password IS NOT NULL) as protected, expires_at, created_at, access_count
+        SELECT token, (password IS NOT NULL) as protected, expires_at, created_at, access_count, max_views
         FROM shares WHERE file_id = ? ORDER BY created_at DESC
     ');
     $stmt->execute([$row['id']]);
@@ -651,6 +761,7 @@ if ($action === 'shares' && isset($_GET['id'])) {
         $s['url']       = share_url($s['token']);
         $s['expired']   = $s['expires_at'] && $s['expires_at'] < time();
         $s['protected'] = (bool)$s['protected'];
+        $s['burn_after_reading'] = $s['max_views'] > 0;
     }
     out(['file_id' => $_GET['id'], 'shares' => $shares]);
 }
@@ -685,6 +796,30 @@ if ($action === 'maintenance') {
     $stmt = $db->prepare('DELETE FROM shares WHERE expires_at > 0 AND expires_at < ?');
     $stmt->execute([$time]);
     $report['expired_shares_deleted'] = $stmt->rowCount();
+
+    // 2.5 Xóa File Gốc quá hạn (File Expiry)
+    $stmt = $db->prepare('SELECT id, filename FROM files WHERE expires_at IS NOT NULL AND expires_at < ?');
+    $stmt->execute([$time]);
+    $expiredFiles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $expDel = 0;
+    if ($expiredFiles) {
+        $delFile = $db->prepare('DELETE FROM files WHERE id = ?');
+        $delSh   = $db->prepare('DELETE FROM shares WHERE file_id = ?');
+        $chkStmt = $db->prepare('SELECT COUNT(1) FROM files WHERE filename = ?');
+        foreach ($expiredFiles as $f) {
+            $delSh->execute([$f['id']]);
+            $delFile->execute([$f['id']]);
+            // Deduplication safety check
+            $chkStmt->execute([$f['filename']]);
+            if ($chkStmt->fetchColumn() == 0) {
+                $slug = str_replace('/', '_', $f['filename']);
+                @unlink(UPLOAD_BASE . $f['filename']);
+                foreach (glob(THUMB_DIR . '*' . $slug) as $c) @unlink($c);
+            }
+            $expDel++;
+        }
+    }
+    $report['expired_files_deleted'] = $expDel;
 
     // 3. Xóa Cache thumbnails > 30 ngày không ai xem
     $cacheDel = 0;
@@ -767,6 +902,6 @@ if ($action === 'stats') {
 // Fallback: không match route nào → JSON thay vì HTML server error
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 if ($action) {
-    out(['error' => 'Unknown action', 'valid_actions' => ['list','upload','delete','bulk_delete','zip','share','shares','revoke','clear_cache','maintenance','stats']], 400);
+    out(['error' => 'Unknown action', 'valid_actions' => ['list','folders','upload','delete','bulk_delete','zip','share','shares','revoke','clear_cache','maintenance','stats','api_keys']], 400);
 }
 out(['error' => 'Not found', 'path' => $uri], 404);

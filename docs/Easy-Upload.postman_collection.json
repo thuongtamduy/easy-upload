@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Easy Upload",
-    "description": "File storage API — upload, manage, share.",
+    "name": "Easy Upload v3.0",
+    "description": "File storage API — upload, manage, share, burn-after-reading, auto WebP, Telegram notifications.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -13,193 +13,246 @@
     ]
   },
   "variable": [
-    { "key": "base_url", "value": "https://example.com" },
-    { "key": "api_key",  "value": "CHANGE_ME_TO_A_RANDOM_SECRET_KEY", "type": "string", "description": "Lấy từ file config.php" },
-    { "key": "id",       "value": "",                   "description": "Public ID của file (lấy từ response Upload hoặc List)" },
-    { "key": "token",    "value": "",                   "description": "Share token (tự động lưu khi gọi Share)" }
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "api_key",  "value": "CHANGE_ME_TO_A_RANDOM_SECRET_KEY", "type": "string", "description": "Master Key (config.php) hoặc Admin/User Key (DB)" },
+    { "key": "id",       "value": "", "description": "Public ID của file" },
+    { "key": "token",    "value": "", "description": "Share token" },
+    { "key": "api_key_id", "value": "", "description": "ID của API Key" }
   ],
   "item": [
     {
-      "name": "🧹 Maintenance Cron",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{base_url}}/?action=maintenance", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "maintenance" }] }
-      }
-    },
-    {
-      "name": "📊 Stats",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{base_url}}/?action=stats", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "stats" }] }
-      }
-    },
-    {
-      "name": "📋 List",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=list&page=1",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [
-            { "key": "action", "value": "list" },
-            { "key": "page",   "value": "1" },
-            { "key": "q",      "value": "", "disabled": true, "description": "Tìm theo tên file" },
-            { "key": "from",   "value": "2026-01-01", "disabled": true, "description": "YYYY-MM-DD" },
-            { "key": "to",     "value": "2026-12-31", "disabled": true, "description": "YYYY-MM-DD" }
-          ]
-        }
-      }
-    },
-    {
-      "name": "⬆️ Upload",
-      "event": [{
-        "listen": "test",
-        "script": {
-          "exec": [
-            "const res = pm.response.json();",
-            "if (res.uploaded?.[0]?.id) pm.collectionVariables.set('id', res.uploaded[0].id);",
-            "pm.test('Upload OK', () => pm.response.to.have.status(201));"
-          ],
-          "type": "text/javascript"
-        }
-      }],
-      "request": {
-        "method": "POST",
-        "body": { "mode": "formdata", "formdata": [{ "key": "files[]", "type": "file", "src": [] }] },
-        "url": { "raw": "{{base_url}}/?action=upload", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "upload" }] }
-      }
-    },
-    {
-      "name": "🗑️ Delete",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=delete&id={{id}}",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [{ "key": "action", "value": "delete" }, { "key": "id", "value": "{{id}}" }]
-        }
-      }
-    },
-    {
-      "name": "🗑️ Bulk Delete",
-      "request": {
-        "method": "POST",
-        "body": {
-          "mode": "urlencoded",
-          "urlencoded": [
-            { "key": "ids[]", "value": "{{id}}", "type": "text" },
-            { "key": "ids[]", "value": "",       "type": "text", "description": "Thêm ID thứ 2,3..." }
-          ]
+      "name": "📂 File Management",
+      "item": [
+        {
+          "name": "⬆️ Upload File",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const res = pm.response.json();",
+                "if (res.uploaded?.[0]?.id) pm.collectionVariables.set('id', res.uploaded[0].id);"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files[]", "type": "file", "src": [] },
+                { "key": "folder", "value": "Tài Liệu Mật", "type": "text", "description": "Virtual Folder", "disabled": true },
+                { "key": "expires_in", "value": "3600", "type": "text", "description": "File sẽ tự hủy sau N giây", "disabled": true }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/?action=upload", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "upload" }] }
+          }
         },
-        "url": { "raw": "{{base_url}}/?action=bulk_delete", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "bulk_delete" }] }
-      }
-    },
-    {
-      "name": "📥 Đóng gói Zip (Multi-download)",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=zip&ids={{id}},id2",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [
-            { "key": "action", "value": "zip" },
-            { "key": "ids", "value": "{{id}},id2" }
-          ]
+        {
+          "name": "📋 List Files",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/?action=list&page=1",
+              "host": ["{{base_url}}"],
+              "query": [
+                { "key": "action", "value": "list" },
+                { "key": "page",   "value": "1" },
+                { "key": "q",      "value": "test", "disabled": true, "description": "Tìm theo tên file" },
+                { "key": "folder", "value": "Tài Liệu Mật", "disabled": true, "description": "Lọc theo thư mục" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "📁 List Folders",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=folders", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "folders" }] }
+          }
+        },
+        {
+          "name": "🗑️ Delete File",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/?action=delete&id={{id}}", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "delete" }, { "key": "id", "value": "{{id}}" }] }
+          }
+        },
+        {
+          "name": "🗑️ Bulk Delete",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "ids[]", "value": "{{id}}", "type": "text" },
+                { "key": "ids[]", "value": "id2", "type": "text", "disabled": true }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/?action=bulk_delete", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "bulk_delete" }] }
+          }
+        },
+        {
+          "name": "📥 Download ZIP",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=zip&ids={{id}}", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "zip" }, { "key": "ids", "value": "{{id}}" }] }
+          }
         }
-      }
+      ]
     },
     {
-      "name": "🔗 Share (permanent)",
-      "event": [{
-        "listen": "test",
-        "script": {
-          "exec": [
-            "const res = pm.response.json();",
-            "if (res.token) pm.collectionVariables.set('token', res.token);",
-            "pm.test('Token created', () => pm.expect(res.token).to.be.a('string'));"
-          ],
-          "type": "text/javascript"
+      "name": "🔗 Sharing & Links",
+      "item": [
+        {
+          "name": "🔗 Create Share Link",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const res = pm.response.json();",
+                "if (res.token) pm.collectionVariables.set('token', res.token);"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "expires_in", "value": "86400", "type": "text", "description": "Hết hạn sau 24h", "disabled": true },
+                { "key": "max_views", "value": "1", "type": "text", "description": "Burn After Reading (Hủy sau 1 lượt xem)", "disabled": true },
+                { "key": "password", "value": "123456", "type": "text", "description": "Mật khẩu bảo vệ", "disabled": true }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/?action=share&id={{id}}", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "share" }, { "key": "id", "value": "{{id}}" }] }
+          }
+        },
+        {
+          "name": "📋 View Active Shares",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=shares&id={{id}}", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "shares" }, { "key": "id", "value": "{{id}}" }] }
+          }
+        },
+        {
+          "name": "🚫 Revoke Share",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/?action=revoke&token={{token}}", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "revoke" }, { "key": "token", "value": "{{token}}" }] }
+          }
         }
-      }],
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=share&id={{id}}&expires=0",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [
-            { "key": "action",   "value": "share" },
-            { "key": "id",       "value": "{{id}}" },
-            { "key": "expires",  "value": "0",    "description": "0=vĩnh viễn | 3600=1h | 86400=24h" },
-            { "key": "password", "value": "",     "disabled": true, "description": "Tuỳ chọn: mật khẩu bảo vệ" }
-          ]
+      ]
+    },
+    {
+      "name": "🔑 API Keys (Admin)",
+      "item": [
+        {
+          "name": "📋 List Keys",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=api_keys&sub=list", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "api_keys" }, { "key": "sub", "value": "list" }] }
+          }
+        },
+        {
+          "name": "➕ Create Key",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const res = pm.response.json();",
+                "if (res.api_key) console.log('New Key:', res.api_key);"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "name", "value": "Mobile App User", "type": "text" },
+                { "key": "role", "value": "user", "type": "text", "description": "user hoặc admin" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/?action=api_keys&sub=create", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "api_keys" }, { "key": "sub", "value": "create" }] }
+          }
+        },
+        {
+          "name": "✅ Toggle Key Status",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "urlencoded", "urlencoded": [{ "key": "id", "value": "{{api_key_id}}", "type": "text" }] },
+            "url": { "raw": "{{base_url}}/?action=api_keys&sub=toggle", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "api_keys" }, { "key": "sub", "value": "toggle" }] }
+          }
+        },
+        {
+          "name": "🗑️ Delete Key",
+          "request": {
+            "method": "POST",
+            "body": { "mode": "urlencoded", "urlencoded": [{ "key": "id", "value": "{{api_key_id}}", "type": "text" }] },
+            "url": { "raw": "{{base_url}}/?action=api_keys&sub=delete", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "api_keys" }, { "key": "sub", "value": "delete" }] }
+          }
         }
-      }
+      ]
     },
     {
-      "name": "📋 Shares (list of file)",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=shares&id={{id}}",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [{ "key": "action", "value": "shares" }, { "key": "id", "value": "{{id}}" }]
+      "name": "⚙️ System",
+      "item": [
+        {
+          "name": "📊 Stats",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=stats", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "stats" }] }
+          }
+        },
+        {
+          "name": "🧹 Maintenance (Cron)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/?action=maintenance", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "maintenance" }] }
+          }
+        },
+        {
+          "name": "🧹 Clear Cache",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/?action=clear_cache", "host": ["{{base_url}}"], "query": [{ "key": "action", "value": "clear_cache" }] }
+          }
         }
-      }
+      ]
     },
     {
-      "name": "🚫 Revoke share",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/?action=revoke&token={{token}}",
-          "host": ["{{base_url}}"],
-          "path": [""],
-          "query": [{ "key": "action", "value": "revoke" }, { "key": "token", "value": "{{token}}" }]
+      "name": "🌐 Public CDN Endpoints",
+      "item": [
+        {
+          "name": "🖼️ View / Download File",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/file/{{id}}", "host": ["{{base_url}}"], "path": ["file", "{{id}}"] }
+          }
+        },
+        {
+          "name": "🖼️ View Image (Resize: 300px)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/file/{{id}}?w=300", "host": ["{{base_url}}"], "path": ["file", "{{id}}"], "query": [{ "key": "w", "value": "300", "description": "Chiều rộng" }] }
+          }
+        },
+        {
+          "name": "🔒 View Shared File",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/share/{{token}}",
+              "host": ["{{base_url}}"],
+              "path": ["share", "{{token}}"],
+              "query": [{ "key": "password", "value": "123456", "disabled": true, "description": "Chỉ dùng nếu link có mật khẩu" }]
+            }
+          }
         }
-      }
-    },
-    {
-      "name": "🌐 CDN — serve file",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{base_url}}/file/{{token}}", "host": ["{{base_url}}"], "path": ["file", "{{token}}"] }
-      }
-    },
-    {
-      "name": "🌐 CDN — resize ?s=300",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/file/{{token}}?s=300",
-          "host": ["{{base_url}}"],
-          "path": ["file", "{{token}}"],
-          "query": [{ "key": "s", "value": "300", "description": "Square crop. Hợp lệ: 100 150 200 300 400 500 600 800 1000 1200" }]
-        }
-      }
-    },
-    {
-      "name": "🌐 CDN — resize ?w=800",
-      "request": {
-        "method": "GET",
-        "url": {
-          "raw": "{{base_url}}/file/{{token}}?w=800",
-          "host": ["{{base_url}}"],
-          "path": ["file", "{{token}}"],
-          "query": [{ "key": "w", "value": "800", "description": "Width. Hợp lệ: 100 150 200 300 400 500 600 800 1000 1200" }]
-        }
-      }
-    },
-    {
-      "name": "🧹 Clear cache",
-      "request": {
-        "method": "GET",
-        "url": { "raw": "{{base_url}}/?action=clear_cache", "host": ["{{base_url}}"], "path": [""], "query": [{ "key": "action", "value": "clear_cache" }] }
-      }
+      ]
     }
   ]
 }

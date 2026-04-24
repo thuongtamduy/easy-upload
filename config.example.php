@@ -14,3 +14,7 @@ define('ALLOWED_ORIGINS', ['*']);
 
 // Rate limit — số request tối đa mỗi phút mỗi IP
 define('RATE_LIMIT', 100);
+
+// Telegram Webhooks — Bắn thông báo khi có file upload hoặc khi server lỗi
+define('TG_BOT_TOKEN', '');
+define('TG_CHAT_ID', '');

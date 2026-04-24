@@ -1,0 +1,29 @@
+# 'version' field is deprecated in modern Docker Compose
+services:
+  easy-upload:
+    build: .
+    container_name: easy-upload
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'        # Giới hạn tối đa 1 nhân CPU (để dành tài nguyên cho các app khác)
+          memory: 1G         # Giới hạn tối đa 1GB RAM (vừa đủ cho PHP 512MB + Apache)
+        reservations:
+          cpus: '0.2'        # Đảm bảo lúc nào cũng có ít nhất 0.2 nhân CPU
+          memory: 256M       # Đảm bảo lúc nào cũng có ít nhất 256MB RAM
+    ports:
+      # Ánh xạ port 8080 của máy chủ host vào port 80 của Apache container
+      - "8080:80"
+    environment:
+      # Đảm bảo giờ giấc trong container khớp với giờ Việt Nam để tạo thư mục YYYY/MM/DD chính xác
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      # Mount thư mục storage ra ngoài để dữ liệu không bị mất khi container khởi động lại
+      - ./storage:/var/www/html/storage
+      
+      # LƯU Ý QUAN TRỌNG: 
+      # Nếu bạn muốn mount config, HÃY TỰ TẠO FILE config.php trên máy host trước,
+      # sau đó mới bỏ comment dòng bên dưới.
+      # Nếu file không tồn tại, Docker sẽ tự tạo thành một... THƯ MỤC tên là config.php làm sập web.
+      # - ./config.php:/var/www/html/config.php
