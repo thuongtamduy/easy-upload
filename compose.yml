@@ -18,6 +18,15 @@ services:
     environment:
       # Đảm bảo giờ giấc trong container khớp với giờ Việt Nam để tạo thư mục YYYY/MM/DD chính xác
       - TZ=Asia/Ho_Chi_Minh
+      # BẮT BUỘC: Master API key (chuỗi ngẫu nhiên >= 20 ký tự). Đặt trong file .env cạnh compose.yml:
+      #   API_KEY=$(php -r "echo bin2hex(random_bytes(24));")
+      # Nếu không đặt, mọi API quản trị sẽ bị từ chối (503) — server KHÔNG mở public.
+      - API_KEY=${API_KEY:-}
+      # Tuỳ chọn: IP/CIDR của reverse proxy (Nginx, Cloudflare...) để lấy IP thật của client.
+      # Để trống nếu container nhận request trực tiếp.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      # Tuỳ chọn: URL công khai (chống Host header injection), VD https://files.example.com
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
     volumes:
       # Mount thư mục storage ra ngoài để dữ liệu không bị mất khi container khởi động lại
       - ./storage:/var/www/html/storage
