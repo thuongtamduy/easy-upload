@@ -1,0 +1,10 @@
+.git
+.gitignore
+.dockerignore
+.env
+config.php
+storage
+docs
+*.md
+Dockerfile
+compose.yml

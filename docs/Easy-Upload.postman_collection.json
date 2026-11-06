@@ -14,7 +14,7 @@
   },
   "variable": [
     { "key": "base_url", "value": "http://localhost:8080" },
-    { "key": "api_key",  "value": "CHANGE_ME_TO_A_RANDOM_SECRET_KEY", "type": "string", "description": "Master Key (config.php) hoặc Admin/User Key (DB)" },
+    { "key": "api_key",  "value": "", "type": "string", "description": "Master Key (config.php) hoặc Admin/User Key (DB)" },
     { "key": "id",       "value": "", "description": "Public ID của file" },
     { "key": "token",    "value": "", "description": "Share token" },
     { "key": "api_key_id", "value": "", "description": "ID của API Key" }

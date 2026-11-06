@@ -16,3 +16,6 @@ Thumbs.db
 # Logs
 error_log
 *.log
+
+# Biến môi trường chứa API key
+.env

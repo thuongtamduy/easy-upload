@@ -23,6 +23,14 @@ RewriteEngine On
 Options -Indexes
 RewriteBase /
 
+# Bảo mật: chặn truy cập trực tiếp storage (DB, WAL, file upload),
+# file/thư mục ẩn (.git, .env, .htaccess...) và file nội bộ của dự án.
+# Mọi file upload đều được phục vụ an toàn qua /file/{id} hoặc /share/{token}.
+RewriteRule ^storage(/|$) - [F,L]
+RewriteRule (^|/)\.(?!well-known/) - [F,L]
+RewriteRule ^docs(/|$) - [F,L]
+RewriteRule ^(Dockerfile|compose\.ya?ml|docker-compose\.ya?ml|README\.md|config(\.example)?\.php)$ - [F,L]
+
 # /file/{public_id} → truy cập trực tiếp
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^file/([a-zA-Z0-9]+)/?$ index.php?pubid=$1 [QSA,L]
@@ -30,11 +38,6 @@ RewriteRule ^file/([a-zA-Z0-9]+)/?$ index.php?pubid=$1 [QSA,L]
 # /share/{token} → share link (password/expiry)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^share/([a-zA-Z0-9]+)/?$ index.php?token=$1 [QSA,L]
-
-# 4. Backward Compatibility V1: Xử lý resize ảnh cũ từ storage/uploads/
-RewriteCond %{REQUEST_FILENAME} -f
-RewriteCond %{QUERY_STRING} (w|h|s)=
-RewriteRule ^storage/uploads/(.*)$ index.php?process_image=$1 [QSA,L]
 
 # Catch-all: mọi request không match ở trên → index.php (trả JSON thay vì LiteSpeed HTML)
 RewriteCond %{REQUEST_FILENAME} !-f
